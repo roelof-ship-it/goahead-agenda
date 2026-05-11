@@ -51,19 +51,15 @@ function encryptUsers(usersArr) {
 }
 
 function decryptUsers(encoded) {
-  try {
-    const key  = crypto.scryptSync(ENCRYPT_SECRET, 'gak-salt', 32);
-    const buf  = Buffer.from(encoded, 'base64');
-    const iv   = buf.slice(0, 12);
-    const tag  = buf.slice(12, 28);
-    const data = buf.slice(28);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-    return JSON.parse(decrypted.toString('utf8'));
-  } catch(e) {
-    return [];
-  }
+  const key  = crypto.scryptSync(ENCRYPT_SECRET, 'gak-salt', 32);
+  const buf  = Buffer.from(encoded, 'base64');
+  const iv   = buf.slice(0, 12);
+  const tag  = buf.slice(12, 28);
+  const data = buf.slice(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  return JSON.parse(decrypted.toString('utf8'));
 }
 
 exports.handler = async function(event) {
@@ -86,7 +82,17 @@ exports.handler = async function(event) {
       // Ontsleutel gebruikers server-side — stuur ze NOOIT naar de browser
       let users = [];
       if (typeof record.users === 'string') {
-        users = decryptUsers(record.users);
+        try {
+          users = decryptUsers(record.users);
+        } catch(decErr) {
+          return {
+            statusCode: 500,
+            headers: CORS,
+            body: JSON.stringify({
+              error: 'Kan gebruikersdata niet ontsleutelen. ENCRYPT_SECRET klopt mogelijk niet.'
+            })
+          };
+        }
       } else if (Array.isArray(record.users)) {
         users = record.users;
       }
@@ -110,10 +116,29 @@ exports.handler = async function(event) {
       const current = await jsonbinRequest('GET');
       const record  = JSON.parse(current.body).record || {};
       let storedUsers = [];
+      let usersLoaded = false;
+
       if (typeof record.users === 'string') {
-        storedUsers = decryptUsers(record.users);
+        try {
+          storedUsers = decryptUsers(record.users);
+          usersLoaded = true;
+        } catch(decErr) {
+          // Versleutelde data kan niet gelezen worden — WEIGER deze opslag
+          // om te voorkomen dat gebruikersdata wordt overschreven
+          return {
+            statusCode: 500,
+            headers: CORS,
+            body: JSON.stringify({
+              error: 'Kan bestaande gebruikersdata niet ontsleutelen. ENCRYPT_SECRET klopt mogelijk niet. Opslag geweigerd om dataverlies te voorkomen.'
+            })
+          };
+        }
       } else if (Array.isArray(record.users)) {
         storedUsers = record.users;
+        usersLoaded = true;
+      } else {
+        // Geen users veld — alleen bootstrap actie toegestaan
+        usersLoaded = true;
       }
 
       // Verwerk gebruikerswijzigingen
@@ -169,7 +194,17 @@ exports.handler = async function(event) {
       const record  = JSON.parse(current.body).record || {};
       let storedUsers = [];
       if (typeof record.users === 'string') {
-        storedUsers = decryptUsers(record.users);
+        try {
+          storedUsers = decryptUsers(record.users);
+        } catch(decErr) {
+          return {
+            statusCode: 500,
+            headers: CORS,
+            body: JSON.stringify({
+              error: 'Kan gebruikersdata niet ontsleutelen. ENCRYPT_SECRET klopt mogelijk niet.'
+            })
+          };
+        }
       } else if (Array.isArray(record.users)) {
         storedUsers = record.users;
       }
